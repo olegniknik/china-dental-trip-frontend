@@ -6,7 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .models import Role, TokenPayload, UserOut
 from .security import decode_access_token
-from .storage import USERS
+from .storage import get_user_by_id
 
 security_scheme = HTTPBearer(auto_error=False)
 
@@ -24,11 +24,11 @@ def get_current_user(creds: Annotated[Optional[HTTPAuthorizationCredentials], De
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
     payload = TokenPayload.model_validate(payload_dict)
-    user_raw = next((u for u in USERS if u["id"] == payload.sub), None)
-    if not user_raw:
+    user = get_user_by_id(payload.sub)
+    if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
-    return UserOut(**user_raw)
+    return user
 
 
 def require_role(required: Role):

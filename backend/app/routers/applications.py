@@ -1,9 +1,10 @@
 """Маршруты для работы с заявками клиентов."""
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 from ..dependencies import require_any_role
+from ..email_utils import send_application_notification
 from ..models import (
     ApplicationCreate,
     ApplicationGoal,
@@ -14,16 +15,22 @@ from ..models import (
     Role,
     UserOut,
 )
-from ..storage import APPLICATIONS, create_application
+from ..storage import (
+    create_application,
+    delete_application_in_db,
+    get_application_by_id,
+    list_applications_from_db,
+    update_application_in_db,
+)
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
 
 @router.post("/", response_model=ApplicationOut, status_code=status.HTTP_201_CREATED)
-def create_application_public(data: ApplicationCreate) -> ApplicationOut:
+def create_application_public(data: ApplicationCreate, background_tasks: BackgroundTasks) -> ApplicationOut:
     """Публичная точка для создания заявки с сайта.
 
-    Авторизация не требуется, данные хранятся в памяти.
+    Авторизация не требуется, данные попадают в SQLite и на почту.
     """
     # Простое бизнес-правило: если есть операции на лице, требуем пояснение
     if data.has_face_operations and (not data.face_operation_details or len(data.face_operation_details) < 5):
@@ -31,7 +38,10 @@ def create_application_public(data: ApplicationCreate) -> ApplicationOut:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Укажите подробности предыдущих операций на лице",
         )
-    return create_application(data)
+    created = create_application(data)
+    # Отправляем уведомление о новой заявке в фоне, чтобы не задерживать ответ.
+    background_tasks.add_task(send_application_notification, created)
+    return created
 
 
 @router.get("/", response_model=List[ApplicationOut])
@@ -42,42 +52,31 @@ def list_applications(
     procedure_type: Optional[ProcedureTypeEnum] = None,
 ) -> List[ApplicationOut]:
     """Список заявок (только админ/оператор) с простыми фильтрами."""
-    result = APPLICATIONS.copy()
-    if status_filter is not None:
-        result = [a for a in result if a["status"] == status_filter]
-    if goal is not None:
-        result = [a for a in result if a.get("goal") == goal]
-    if procedure_type is not None:
-        result = [a for a in result if a.get("procedure_type") == procedure_type]
-
-    return [ApplicationOut(**a) for a in result]
+    return list_applications_from_db(status_filter=status_filter, goal=goal, procedure_type=procedure_type)
 
 
 @router.get("/{app_id}", response_model=ApplicationOut)
 def get_application(app_id: str, _: UserOut = Depends(require_any_role(Role.ADMIN, Role.OPERATOR))) -> ApplicationOut:
     """Получить одну заявку по id (только админ/оператор)."""
-    app_raw = next((a for a in APPLICATIONS if a["id"] == app_id), None)
-    if not app_raw:
+    app_obj = get_application_by_id(app_id)
+    if app_obj is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
-    return ApplicationOut(**app_raw)
+    return app_obj
 
 
 @router.patch("/{app_id}", response_model=ApplicationOut)
 def update_application(app_id: str, data: ApplicationUpdate, _: UserOut = Depends(require_any_role(Role.ADMIN, Role.OPERATOR))) -> ApplicationOut:
     """Обновить статус и комментарий по заявке."""
-    app_raw = next((a for a in APPLICATIONS if a["id"] == app_id), None)
-    if not app_raw:
+    updated = update_application_in_db(app_id, data)
+    if updated is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
-
-    update_dict = data.model_dump(exclude_unset=True)
-    app_raw.update(update_dict)
-    return ApplicationOut(**app_raw)
+    return updated
 
 
 @router.delete("/{app_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_application(app_id: str, _: UserOut = Depends(require_any_role(Role.ADMIN, Role.OPERATOR))) -> None:
     """Удалить заявку (для демо; в реале лучше архивировать)."""
-    index = next((i for i, a in enumerate(APPLICATIONS) if a["id"] == app_id), None)
-    if index is None:
+    ok = delete_application_in_db(app_id)
+    if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
-    APPLICATIONS.pop(index)
+

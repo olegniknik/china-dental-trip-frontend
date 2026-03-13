@@ -19,8 +19,9 @@ import {
   legalPages,
 } from './data'
 
-// Базовый адрес API — при необходимости вынеси в .env фронтенда или конфиг
-const API_BASE = 'http://localhost:3000/api'
+// Базовый адрес API — FastAPI на backend (по умолчанию порт 8002).
+// Можно переопределить через Vite-ENV: VITE_API_BASE.
+const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? 'http://localhost:8002'
 
 // ——— Простой empty state компонент (без отдельного файла) ———
 function EmptyState({ title, desc, action }: { title: string; desc?: string; action?: React.ReactNode }) {

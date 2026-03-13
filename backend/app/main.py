@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .routers import applications, auth, clinic, procedures, users
-from .storage import init_admin_user
+from .storage import init_admin_user, init_db
 
 
 def create_app() -> FastAPI:
@@ -26,7 +26,8 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Инициализируем in-memory администратора
+    # Инициализируем базу и администратора
+    init_db()
     init_admin_user()
 
     # Простой health-check, удобно для фронтенда и мониторинга
