@@ -1,6 +1,7 @@
 /**
  * Все страницы сайта в одном файле для простоты V1.
- * Импорт данных из data.ts (моки).
+ * Изначально данные были захардкожены в data.ts,
+ * теперь часть данных берём с бэкенда через fetch.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
@@ -16,8 +17,10 @@ import {
   blogPosts,
   contacts,
   legalPages,
-  clinic,
 } from './data'
+
+// Базовый адрес API — при необходимости вынеси в .env фронтенда или конфиг
+const API_BASE = 'http://localhost:3000/api'
 
 // ——— Простой empty state компонент (без отдельного файла) ———
 function EmptyState({ title, desc, action }: { title: string; desc?: string; action?: React.ReactNode }) {
@@ -28,6 +31,16 @@ function EmptyState({ title, desc, action }: { title: string; desc?: string; act
       {action ? <div className="mt-4">{action}</div> : null}
     </div>
   )
+}
+
+type ClinicFromApi = {
+  id: string
+  name: string
+  description: string
+  specializations: string[]
+  rating: number
+  certificates: string[]
+  avg_price_info: string
 }
 
 // ——— Главная ———
@@ -101,6 +114,40 @@ export function ServicesPage() {
       </>
     )
   }
+  const [clinicData, setClinicData] = useState<ClinicFromApi | null>(null)
+  const [clinicLoading, setClinicLoading] = useState(false)
+  const [clinicError, setClinicError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const loadClinic = async () => {
+      setClinicLoading(true)
+      setClinicError(null)
+      try {
+        const res = await fetch(`${API_BASE}/clinic`)
+        if (!res.ok) {
+          throw new Error(`Ошибка ${res.status}`)
+        }
+        const data: ClinicFromApi = await res.json()
+        if (!cancelled) {
+          setClinicData(data)
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setClinicError('Не удалось загрузить данные клиники')
+        }
+      } finally {
+        if (!cancelled) {
+          setClinicLoading(false)
+        }
+      }
+    }
+    loadClinic()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <>
       <h1 className="text-2xl font-bold text-stone-800 mb-6">Услуги</h1>
@@ -113,19 +160,44 @@ export function ServicesPage() {
         ))}
       </div>
 
-      {/* Оставляем одну проверенную клинику (без вкладки «Партнёры») */}
+      {/* Клиника: теперь данные берём с бэкенда, а не из моков */}
       <section className="mt-8 p-4 bg-white border border-stone-200 rounded-lg">
         <h2 className="text-lg font-semibold text-stone-800 mb-2">Клиника</h2>
-        <p className="text-stone-600 mb-3">{clinic.note}</p>
-        <div className="p-4 rounded-lg bg-stone-50 border border-stone-200">
-          <p className="font-semibold text-stone-800">{clinic.name}</p>
-          <p className="text-sm text-stone-600 mt-1">{clinic.spec}</p>
-          <p className="text-sm text-stone-600 mt-1">Рейтинг: {clinic.rating}</p>
-          <p className="text-xs text-stone-500 mt-1">{clinic.license}</p>
-          <Link to="/kontakty#form" className="inline-block mt-3 text-sm font-medium text-amber-600 hover:underline">
-            Запросить детали по клинике →
-          </Link>
-        </div>
+        {clinicLoading && <p className="text-sm text-stone-500">Загрузка информации о клинике…</p>}
+        {clinicError && !clinicLoading && (
+          <EmptyState
+            title="Не удалось загрузить данные клиники"
+            desc="Попробуйте обновить страницу чуть позже."
+            action={
+              <button
+                type="button"
+                className="text-sm text-amber-600 hover:underline"
+                onClick={() => {
+                  // грубый перезапуск загрузки — просто обновим страницу
+                  window.location.reload()
+                }}
+              >
+                Обновить страницу
+              </button>
+            }
+          />
+        )}
+        {!clinicLoading && !clinicError && clinicData && (
+          <>
+            <p className="text-stone-600 mb-3">{clinicData.description}</p>
+            <div className="p-4 rounded-lg bg-stone-50 border border-stone-200">
+              <p className="font-semibold text-stone-800">{clinicData.name}</p>
+              <p className="text-sm text-stone-600 mt-1">
+                Направления: {clinicData.specializations.join(', ')}
+              </p>
+              <p className="text-sm text-stone-600 mt-1">Рейтинг: {clinicData.rating.toFixed(1)}</p>
+              <p className="text-xs text-stone-500 mt-1">{clinicData.avg_price_info}</p>
+              <Link to="/kontakty#form" className="inline-block mt-3 text-sm font-medium text-amber-600 hover:underline">
+                Запросить детали по клинике →
+              </Link>
+            </div>
+          </>
+        )}
       </section>
     </>
   )
@@ -425,6 +497,8 @@ function RequestForm() {
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   const validate = () => {
     const next: Record<string, string> = {}
@@ -450,7 +524,59 @@ function RequestForm() {
     const nextErrors = validate()
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) return
-    setSent(true)
+
+    const send = async () => {
+      setIsSubmitting(true)
+      setSubmitError(null)
+      try {
+        const body = {
+          first_name: undefined,
+          last_name: undefined,
+          phone,
+          email: email || undefined,
+          city: undefined,
+          preferred_dates: undefined,
+          goal: goal || undefined,
+          procedure_type: procedureType || undefined,
+          has_face_operations: faceOpHistory === 'yes' ? true : faceOpHistory === 'no' ? false : undefined,
+          face_operation_details: faceOpDetails || undefined,
+          chronic_diseases: chronic || undefined,
+          allergies: allergies || undefined,
+          has_medical_files: false,
+          comment: undefined,
+        }
+
+        const res = await fetch(`${API_BASE}/applications`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        })
+
+        if (!res.ok) {
+          let message = `Ошибка отправки: ${res.status}`
+          try {
+            const data = await res.json()
+            if (data && typeof data.detail === 'string') {
+              message = data.detail
+            }
+          } catch {
+            // ignore
+          }
+          setSubmitError(message)
+          return
+        }
+
+        setSent(true)
+      } catch {
+        setSubmitError('Не удалось отправить заявку. Проверьте соединение или попробуйте позже.')
+      } finally {
+        setIsSubmitting(false)
+      }
+    }
+
+    void send()
   }
 
   if (sent) {
@@ -630,14 +756,15 @@ function RequestForm() {
         <span className="text-sm text-stone-600">Согласен на обработку персональных данных *</span>
       </label>
       {errors.agree ? <p className="text-xs text-red-600 -mt-2">{errors.agree}</p> : null}
+      {submitError ? <p className="text-xs text-red-600">{submitError}</p> : null}
       <div className="flex flex-wrap gap-3">
         {/* Улучшение интерфейса: кнопка disabled, пока не заполнен телефон и нет согласия */}
         <button
           type="submit"
-          disabled={!canSubmit}
+          disabled={!canSubmit || isSubmitting}
           className="px-5 py-2.5 bg-amber-500 text-white rounded-lg font-medium hover:bg-amber-600 disabled:opacity-50"
         >
-          Отправить заявку
+          {isSubmitting ? 'Отправка…' : 'Отправить заявку'}
         </button>
         <button type="button" className="px-5 py-2.5 border border-stone-300 rounded-lg font-medium hover:bg-stone-100">
           Заказать звонок
