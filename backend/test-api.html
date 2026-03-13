@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Тест API — China Dental Trip</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 20px; }
+    h1, h2 { margin-bottom: 0.3rem; }
+    section { border: 1px solid #ddd; padding: 12px; margin-bottom: 16px; border-radius: 6px; }
+    button { margin: 4px 4px 4px 0; padding: 6px 10px; }
+    input, select, textarea { margin: 2px 0 6px; padding: 4px; width: 100%; max-width: 320px; }
+    label { font-size: 0.9rem; display: block; margin-top: 4px; }
+    pre { background: #111; color: #0f0; padding: 10px; white-space: pre-wrap; max-height: 320px; overflow: auto; }
+    .row { display: flex; flex-wrap: wrap; gap: 16px; }
+    .col { flex: 1 1 260px; }
+  </style>
+</head>
+<body>
+  <h1>Тест API — China Dental Trip</h1>
+  <p>Перед началом убедись, что бэкенд запущен: <code>uvicorn app.main:app --reload --port 8000</code></p>
+
+  <section>
+    <h2>Настройки</h2>
+    <label>
+      Базовый URL API
+      <input id="apiBase" value="http://127.0.0.1:8000" />
+    </label>
+    <label>
+      Токен (будет подставляться в Authorization)
+      <input id="token" placeholder="Bearer ..." />
+    </label>
+    <button id="clearLog">Очистить лог</button>
+  </section>
+
+  <section>
+    <h2>Auth</h2>
+    <div class="row">
+      <div class="col">
+        <label>Email
+          <input id="loginEmail" value="admin@example.com" />
+        </label>
+        <label>Пароль
+          <input id="loginPassword" value="admin12345" type="password" />
+        </label>
+        <button id="btnLogin">Войти (POST /auth/login)</button>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Users (нужен токен admin)</h2>
+    <button id="btnUsersList">Получить список (GET /users)</button>
+    <h3>Создать пользователя</h3>
+    <label>Email
+      <input id="createUserEmail" value="operator@example.com" />
+    </label>
+    <label>Пароль
+      <input id="createUserPassword" value="secret12345" type="password" />
+    </label>
+    <label>Роль
+      <select id="createUserRole">
+        <option value="operator">operator</option>
+        <option value="admin">admin</option>
+      </select>
+    </label>
+    <button id="btnUserCreate">Создать (POST /users)</button>
+    <label>ID пользователя для удаления/обновления
+      <input id="userId" placeholder="подставь id из ответа списка" />
+    </label>
+    <button id="btnUserDelete">Удалить (DELETE /users/{id})</button>
+  </section>
+
+  <section>
+    <h2>Applications (заявки)</h2>
+    <div class="row">
+      <div class="col">
+        <h3>Публичное создание заявки (POST /applications)</h3>
+        <label>Имя
+          <input id="appFirstName" value="Ирина" />
+        </label>
+        <label>Фамилия
+          <input id="appLastName" value="Петрова" />
+        </label>
+        <label>Телефон *
+          <input id="appPhone" value="+7 999 123-45-67" />
+        </label>
+        <label>Email
+          <input id="appEmail" value="irina@example.com" />
+        </label>
+        <label>Город
+          <input id="appCity" value="Москва" />
+        </label>
+        <label>Цель (consult / implant / prosthetics / other)
+          <input id="appGoal" value="implant" />
+        </label>
+        <label>Тип процедуры (blepharo / facelift / injections / laser)
+          <input id="appProcedureType" value="blepharo" />
+        </label>
+        <label>Комментарий
+          <textarea id="appComment">Есть КТ, могу прислать в WhatsApp</textarea>
+        </label>
+        <button id="btnAppCreatePublic">Создать заявку (публично)</button>
+      </div>
+      <div class="col">
+        <h3>Работа с заявками (нужен токен admin/operator)</h3>
+        <button id="btnAppList">Список (GET /applications)</button>
+        <label>ID заявки
+          <input id="appId" placeholder="id заявки из списка" />
+        </label>
+        <button id="btnAppGet">Получить одну (GET /applications/{id})</button>
+        <label>Новый статус (new / in_review / scheduled / closed)
+          <input id="appStatus" value="scheduled" />
+        </label>
+        <button id="btnAppUpdate">Обновить (PATCH /applications/{id})</button>
+        <button id="btnAppDelete">Удалить (DELETE /applications/{id})</button>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Clinic & Procedures (публичные)</h2>
+    <button id="btnClinicGet">Клиника (GET /clinic)</button>
+    <button id="btnProceduresGet">Процедуры (GET /procedures)</button>
+  </section>
+
+  <section>
+    <h2>Лог</h2>
+    <pre id="log"></pre>
+  </section>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function log(title, data) {
+      const pre = $("log");
+      const ts = new Date().toISOString();
+      pre.textContent =
+        `[${ts}] ${title}\n` +
+        (data ? JSON.stringify(data, null, 2) : "") +
+        "\n\n" +
+        pre.textContent;
+    }
+
+    function getBase() {
+      return $("apiBase").value.replace(/\/+$/, "");
+    }
+
+    function getAuthHeaders() {
+      const token = $("token").value.trim();
+      return token ? { Authorization: token } : {};
+    }
+
+    async function doFetch(title, path, options = {}) {
+      try {
+        const res = await fetch(getBase() + path, options);
+        const text = await res.text();
+        let json;
+        try { json = text ? JSON.parse(text) : null; } catch {
+          json = { raw: text };
+        }
+        log(`${title} (${res.status})`, json);
+        return { res, json };
+      } catch (e) {
+        log(`${title} — ошибка запроса`, { error: String(e) });
+      }
+    }
+
+    $("clearLog").onclick = () => { $("log").textContent = ""; };
+
+    // Auth
+    $("btnLogin").onclick = async () => {
+      const body = {
+        email: $("loginEmail").value,
+        password: $("loginPassword").value,
+      };
+      const { json } = await doFetch("POST /auth/login", "/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (json && json.access_token) {
+        $("token").value = "Bearer " + json.access_token;
+      }
+    };
+
+    // Users
+    $("btnUsersList").onclick = () =>
+      doFetch("GET /users", "/users/", {
+        headers: { ...getAuthHeaders() },
+      });
+
+    $("btnUserCreate").onclick = () => {
+      const body = {
+        email: $("createUserEmail").value,
+        password: $("createUserPassword").value,
+        role: $("createUserRole").value,
+      };
+      return doFetch("POST /users", "/users/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify(body),
+      });
+    };
+
+    $("btnUserDelete").onclick = () => {
+      const id = $("userId").value.trim();
+      if (!id) return alert("Укажи userId");
+      return doFetch("DELETE /users/{id}", `/users/${id}`, {
+        method: "DELETE",
+        headers: { ...getAuthHeaders() },
+      });
+    };
+
+    // Applications
+    $("btnAppCreatePublic").onclick = () => {
+      const body = {
+        first_name: $("appFirstName").value || null,
+        last_name: $("appLastName").value || null,
+        phone: $("appPhone").value,
+        email: $("appEmail").value || null,
+        city: $("appCity").value || null,
+        goal: $("appGoal").value || null,
+        procedure_type: $("appProcedureType").value || null,
+        comment: $("appComment").value || null,
+        has_medical_files: false,
+      };
+      return doFetch("POST /applications", "/applications/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    };
+
+    $("btnAppList").onclick = () =>
+      doFetch("GET /applications", "/applications/", {
+        headers: { ...getAuthHeaders() },
+      });
+
+    $("btnAppGet").onclick = () => {
+      const id = $("appId").value.trim();
+      if (!id) return alert("Укажи appId");
+      return doFetch("GET /applications/{id}", `/applications/${id}`, {
+        headers: { ...getAuthHeaders() },
+      });
+    };
+
+    $("btnAppUpdate").onclick = () => {
+      const id = $("appId").value.trim();
+      if (!id) return alert("Укажи appId");
+      const body = {
+        status: $("appStatus").value || null,
+      };
+      return doFetch("PATCH /applications/{id}", `/applications/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify(body),
+      });
+    };
+
+    $("btnAppDelete").onclick = () => {
+      const id = $("appId").value.trim();
+      if (!id) return alert("Укажи appId");
+      return doFetch("DELETE /applications/{id}", `/applications/${id}`, {
+        method: "DELETE",
+        headers: { ...getAuthHeaders() },
+      });
+    };
+
+    // Clinic & Procedures
+    $("btnClinicGet").onclick = () =>
+      doFetch("GET /clinic", "/clinic/");
+
+    $("btnProceduresGet").onclick = () =>
+      doFetch("GET /procedures", "/procedures/");
+  </script>
+</body>
+</html>
