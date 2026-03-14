@@ -40,13 +40,17 @@ def _user_from_orm(obj: UserORM) -> UserOut:
 
 
 def init_admin_user() -> UserOut:
-    """Создать администратора из настроек, если его ещё нет."""
+    """Создать администратора из настроек, если его ещё нет. Если уже есть — обновить пароль из .env."""
     from sqlalchemy import select
 
     with SessionLocal() as db:
         stmt = select(UserORM).where(UserORM.email == settings.admin_email.lower())
         existing = db.execute(stmt).scalar_one_or_none()
         if existing:
+            # Чтобы вход по ADMIN_EMAIL/ADMIN_PASSWORD из .env всегда работал
+            existing.password_hash = hash_password(settings.admin_password)
+            db.add(existing)
+            db.commit()
             return _user_from_orm(existing)
 
         now = datetime.now(timezone.utc)

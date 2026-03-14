@@ -17,10 +17,15 @@ def create_app() -> FastAPI:
     # Создаём экземпляр приложения
     app = FastAPI(title=settings.app_name)
 
-    # CORS, чтобы фронтенд (Vite) мог обращаться к API
+    # CORS: разрешаем и localhost, и 127.0.0.1 для фронта на 5173
+    origins = [
+        settings.frontend_origin,
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[settings.frontend_origin],
+        allow_origins=list(dict.fromkeys(origins)),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

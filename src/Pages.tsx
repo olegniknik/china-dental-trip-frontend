@@ -1,10 +1,10 @@
 /**
- * Все страницы сайта в одном файле для простоты V1.
- * Изначально данные были захардкожены в data.ts,
- * теперь часть данных берём с бэкенда через fetch.
+ * Страницы сайта. Форма заявки на Контактах — отправка на бэкенд.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useNavigate } from 'react-router-dom'
+import { useAuth } from './AuthContext'
+import { getApiBase, apiFetch } from './auth'
 import {
   hero,
   benefits,
@@ -17,31 +17,23 @@ import {
   blogPosts,
   contacts,
   legalPages,
+  clinic as clinicStatic,
 } from './data'
 
-// Базовый адрес API — FastAPI на backend (по умолчанию порт 8002).
-// Можно переопределить через Vite-ENV: VITE_API_BASE.
-const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? 'http://localhost:8002'
+const API_BASE = getApiBase()
 
-// ——— Простой empty state компонент (без отдельного файла) ———
 function EmptyState({ title, desc, action }: { title: string; desc?: string; action?: React.ReactNode }) {
   return (
     <div className="p-6 bg-white border border-stone-200 rounded-lg">
       <p className="font-semibold text-stone-800">{title}</p>
-      {desc ? <p className="text-sm text-stone-600 mt-1">{desc}</p> : null}
-      {action ? <div className="mt-4">{action}</div> : null}
+      {desc && <p className="text-sm text-stone-600 mt-1">{desc}</p>}
+      {action && <div className="mt-4">{action}</div>}
     </div>
   )
 }
 
-type ClinicFromApi = {
-  id: string
-  name: string
-  description: string
-  specializations: string[]
-  rating: number
-  certificates: string[]
-  avg_price_info: string
+function isValidEmail(s: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim())
 }
 
 // ——— Главная ———
@@ -60,7 +52,6 @@ export function HomePage() {
           </Link>
         </div>
       </section>
-
       <section className="mb-12">
         <h2 className="text-xl font-semibold text-stone-800 mb-4">Преимущества</h2>
         <div className="grid sm:grid-cols-3 gap-4">
@@ -72,7 +63,6 @@ export function HomePage() {
           ))}
         </div>
       </section>
-
       <section className="mb-12">
         <h2 className="text-xl font-semibold text-stone-800 mb-4">Процесс в 3 шага</h2>
         <ol className="list-decimal list-inside space-y-2 text-stone-700">
@@ -81,7 +71,6 @@ export function HomePage() {
           ))}
         </ol>
       </section>
-
       <section>
         <h2 className="text-xl font-semibold text-stone-800 mb-4">Пакеты услуг</h2>
         <div className="grid sm:grid-cols-3 gap-4">
@@ -107,48 +96,6 @@ export function HomePage() {
 
 // ——— Услуги ———
 export function ServicesPage() {
-  if (services.length === 0) {
-    return (
-      <>
-        <h1 className="text-2xl font-bold text-stone-800 mb-6">Услуги</h1>
-        <EmptyState title="Пока нет списка услуг" desc="Скоро добавим подробности по сопровождению и программам лечения." />
-      </>
-    )
-  }
-  const [clinicData, setClinicData] = useState<ClinicFromApi | null>(null)
-  const [clinicLoading, setClinicLoading] = useState(false)
-  const [clinicError, setClinicError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    const loadClinic = async () => {
-      setClinicLoading(true)
-      setClinicError(null)
-      try {
-        const res = await fetch(`${API_BASE}/clinic`)
-        if (!res.ok) {
-          throw new Error(`Ошибка ${res.status}`)
-        }
-        const data: ClinicFromApi = await res.json()
-        if (!cancelled) {
-          setClinicData(data)
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setClinicError('Не удалось загрузить данные клиники')
-        }
-      } finally {
-        if (!cancelled) {
-          setClinicLoading(false)
-        }
-      }
-    }
-    loadClinic()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
   return (
     <>
       <h1 className="text-2xl font-bold text-stone-800 mb-6">Услуги</h1>
@@ -160,108 +107,54 @@ export function ServicesPage() {
           </section>
         ))}
       </div>
-
-      {/* Клиника: теперь данные берём с бэкенда, а не из моков */}
       <section className="mt-8 p-4 bg-white border border-stone-200 rounded-lg">
         <h2 className="text-lg font-semibold text-stone-800 mb-2">Клиника</h2>
-        {clinicLoading && <p className="text-sm text-stone-500">Загрузка информации о клинике…</p>}
-        {clinicError && !clinicLoading && (
-          <EmptyState
-            title="Не удалось загрузить данные клиники"
-            desc="Попробуйте обновить страницу чуть позже."
-            action={
-              <button
-                type="button"
-                className="text-sm text-amber-600 hover:underline"
-                onClick={() => {
-                  // грубый перезапуск загрузки — просто обновим страницу
-                  window.location.reload()
-                }}
-              >
-                Обновить страницу
-              </button>
-            }
-          />
-        )}
-        {!clinicLoading && !clinicError && clinicData && (
-          <>
-            <p className="text-stone-600 mb-3">{clinicData.description}</p>
-            <div className="p-4 rounded-lg bg-stone-50 border border-stone-200">
-              <p className="font-semibold text-stone-800">{clinicData.name}</p>
-              <p className="text-sm text-stone-600 mt-1">
-                Направления: {clinicData.specializations.join(', ')}
-              </p>
-              <p className="text-sm text-stone-600 mt-1">Рейтинг: {clinicData.rating.toFixed(1)}</p>
-              <p className="text-xs text-stone-500 mt-1">{clinicData.avg_price_info}</p>
-              <Link to="/kontakty#form" className="inline-block mt-3 text-sm font-medium text-amber-600 hover:underline">
-                Запросить детали по клинике →
-              </Link>
-            </div>
-          </>
-        )}
+        <p className="text-stone-600 mb-3">{clinicStatic.note}</p>
+        <p className="font-semibold text-stone-800">{clinicStatic.name}</p>
+        <p className="text-sm text-stone-600 mt-1">{clinicStatic.spec}</p>
+        <p className="text-sm text-stone-600 mt-1">Рейтинг: {clinicStatic.rating}</p>
+        <Link to="/kontakty#form" className="inline-block mt-3 text-sm font-medium text-amber-600 hover:underline">
+          Запросить детали →
+        </Link>
       </section>
     </>
   )
 }
 
-// ——— Как это работает ———
+// ——— Процесс ———
 export function ProcessPage() {
   return (
     <>
       <h1 className="text-2xl font-bold text-stone-800 mb-6">Как это работает</h1>
-      <ol className="space-y-4">
+      <ol className="list-decimal list-inside space-y-3 text-stone-700">
         {processSteps.map((step, i) => (
-          <li key={i} className="flex gap-3">
-            <span className="flex-shrink-0 w-8 h-8 rounded-full bg-amber-100 text-amber-900 font-semibold flex items-center justify-center">
-              {i + 1}
-            </span>
-            <span className="text-stone-700">{step}</span>
-          </li>
+          <li key={i}>{step}</li>
         ))}
       </ol>
+      <Link to="/kontakty#form" className="inline-block mt-6 px-4 py-2 bg-amber-500 text-white rounded-lg font-medium hover:bg-amber-600">
+        Оставить заявку
+      </Link>
     </>
   )
 }
 
-// ——— Цены и пакеты ———
+// ——— Цены ———
 export function PricesPage() {
-  // packages захардкожены как "as const", поэтому длина — литерал 3.
-  // Оставляем этот блок как пример пустого состояния, но условие делаем управляемым.
-  const mode = useMemo(() => {
-    const qs = new URLSearchParams(window.location.search)
-    return { empty: qs.get('empty') === '1' }
-  }, [])
-  const list = mode.empty ? [] : packages
-  if (list.length === 0) {
-    return (
-      <>
-        <h1 className="text-2xl font-bold text-stone-800 mb-6">Цены и пакеты</h1>
-        <EmptyState
-          title="Пакеты пока не опубликованы"
-          desc="Оставьте заявку — подскажем подходящий вариант и ориентировочную стоимость."
-          action={<Link to="/kontakty#form" className="text-amber-600 hover:underline">Оставить заявку →</Link>}
-        />
-      </>
-    )
-  }
   return (
     <>
       <h1 className="text-2xl font-bold text-stone-800 mb-6">Цены и пакеты</h1>
-      <p className="text-stone-600 mb-6">
-        Точная стоимость зависит от дат, города вылета и программы. Нажмите «Узнать точную стоимость» и заполните форму — мы рассчитаем и свяжемся с вами.
-      </p>
       <div className="grid sm:grid-cols-3 gap-4">
-        {list.map((p) => (
-          <div key={p.id} className="p-5 bg-white border border-stone-200 rounded-lg">
-            <h2 className="text-lg font-semibold text-stone-800">{p.name}</h2>
+        {packages.map((p) => (
+          <div key={p.id} className="p-4 bg-white border border-stone-200 rounded-lg">
+            <h3 className="font-semibold text-stone-800">{p.name}</h3>
             <p className="text-amber-600 font-medium my-2">{p.priceRange}</p>
-            <ul className="text-sm text-stone-600 space-y-1 mb-4">
+            <ul className="text-sm text-stone-600 space-y-1">
               {p.items.map((item, i) => (
                 <li key={i}>• {item}</li>
               ))}
             </ul>
-            <Link to="/kontakty#form" className="inline-block px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600">
-              Узнать точную стоимость
+            <Link to="/kontakty#form" className="inline-block mt-3 text-sm font-medium text-amber-600 hover:underline">
+              Узнать точную стоимость →
             </Link>
           </div>
         ))}
@@ -272,75 +165,16 @@ export function PricesPage() {
 
 // ——— Отзывы ———
 export function ReviewsPage() {
-  // Loading/Error/Empty состояния для «страницы списка» (отзывы)
-  // Управление для демонстрации:
-  // - добавьте ?error=1 чтобы увидеть error state
-  // - добавьте ?empty=1 чтобы увидеть empty state
-  const mode = useMemo(() => {
-    const qs = new URLSearchParams(window.location.search)
-    return {
-      error: qs.get('error') === '1',
-      empty: qs.get('empty') === '1',
-    }
-  }, [])
-  const [status, setStatus] = useState<'loading' | 'error' | 'ready'>('loading')
-
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      setStatus(mode.error ? 'error' : 'ready')
-    }, 900)
-    return () => window.clearTimeout(t)
-  }, [mode.error])
-
-  if (status === 'loading') {
-    return (
-      <>
-        <h1 className="text-2xl font-bold text-stone-800 mb-6">Отзывы</h1>
-        <div className="p-4 bg-white border border-stone-200 rounded-lg">
-          <p className="text-stone-700 font-medium">Загрузка…</p>
-          <p className="text-sm text-stone-500 mt-1">Симуляция задержки через setTimeout.</p>
-        </div>
-      </>
-    )
-  }
-
-  if (status === 'error') {
-    return (
-      <>
-        <h1 className="text-2xl font-bold text-stone-800 mb-6">Отзывы</h1>
-        <EmptyState
-          title="Не удалось загрузить отзывы"
-          desc="Это демо error state. Уберите ?error=1 из адресной строки, чтобы увидеть список."
-          action={<Link to="/otzyvy" className="text-amber-600 hover:underline">Попробовать снова →</Link>}
-        />
-      </>
-    )
-  }
-
-  const list = mode.empty ? [] : reviews
-  if (list.length === 0) {
-    return (
-      <>
-        <h1 className="text-2xl font-bold text-stone-800 mb-6">Отзывы</h1>
-        <EmptyState
-          title="Пока нет отзывов"
-          desc="Мы добавим отзывы и кейсы по мере готовности. А пока можете задать вопросы в форме заявки."
-          action={<Link to="/kontakty#form" className="text-amber-600 hover:underline">Задать вопрос →</Link>}
-        />
-      </>
-    )
-  }
   return (
     <>
       <h1 className="text-2xl font-bold text-stone-800 mb-6">Отзывы</h1>
       <div className="space-y-4">
-        {list.map((r) => (
-          <blockquote key={r.id} className="p-4 bg-white border border-stone-200 rounded-lg">
-            <p className="text-stone-700">{r.text}</p>
-            <footer className="mt-2 text-sm text-stone-500">
-              — {r.name}, {r.date}
-            </footer>
-          </blockquote>
+        {reviews.map((r) => (
+          <div key={r.id} className="p-4 bg-white border border-stone-200 rounded-lg">
+            <p className="font-medium text-stone-800">{r.name}</p>
+            <p className="text-sm text-stone-500">{r.date}</p>
+            <p className="text-stone-700 mt-2">{r.text}</p>
+          </div>
         ))}
       </div>
     </>
@@ -349,108 +183,34 @@ export function ReviewsPage() {
 
 // ——— FAQ ———
 export function FaqPage() {
-  const [openId, setOpenId] = useState<string | null>(null)
-  if (faqItems.length === 0) {
-    return (
-      <>
-        <h1 className="text-2xl font-bold text-stone-800 mb-6">Вопросы и ответы</h1>
-        <EmptyState title="Пока нет FAQ" desc="Оставьте заявку — мы уточним детали и ответим на ваши вопросы." action={<Link to="/kontakty#form" className="text-amber-600 hover:underline">Оставить заявку →</Link>} />
-      </>
-    )
-  }
   return (
     <>
       <h1 className="text-2xl font-bold text-stone-800 mb-6">Вопросы и ответы</h1>
-      <div className="space-y-2">
-        {faqItems.map((item, i) => {
-          const id = `faq-${i}`
-          const isOpen = openId === id
-          return (
-            <div key={id} className="border border-stone-200 rounded-lg overflow-hidden bg-white">
-              <button
-                type="button"
-                onClick={() => setOpenId(isOpen ? null : id)}
-                className="w-full px-4 py-3 text-left font-medium text-stone-800 hover:bg-stone-50 flex justify-between items-center"
-              >
-                {item.q}
-                <span className="text-stone-400">{isOpen ? '−' : '+'}</span>
-              </button>
-              {isOpen && <div className="px-4 py-3 border-t border-stone-100 text-stone-600 text-sm">{item.a}</div>}
-            </div>
-          )
-        })}
+      <div className="space-y-4">
+        {faqItems.map((item, i) => (
+          <div key={i} className="p-4 bg-white border border-stone-200 rounded-lg">
+            <p className="font-medium text-stone-800">{item.q}</p>
+            <p className="text-stone-600 mt-1">{item.a}</p>
+          </div>
+        ))}
       </div>
+      <Link to="/kontakty#form" className="inline-block mt-6 text-amber-600 hover:underline">Оставить заявку →</Link>
     </>
   )
 }
 
 // ——— Блог ———
 export function BlogPage() {
-  // Loading/Error/Empty состояния для «страницы списка» (блог)
-  // Управление для демонстрации:
-  // - добавьте ?error=1 чтобы увидеть error state
-  // - добавьте ?empty=1 чтобы увидеть empty state
-  const mode = useMemo(() => {
-    const qs = new URLSearchParams(window.location.search)
-    return {
-      error: qs.get('error') === '1',
-      empty: qs.get('empty') === '1',
-    }
-  }, [])
-  const [status, setStatus] = useState<'loading' | 'error' | 'ready'>('loading')
-
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      setStatus(mode.error ? 'error' : 'ready')
-    }, 900)
-    return () => window.clearTimeout(t)
-  }, [mode.error])
-
-  if (status === 'loading') {
-    return (
-      <>
-        <h1 className="text-2xl font-bold text-stone-800 mb-6">Блог</h1>
-        <div className="p-4 bg-white border border-stone-200 rounded-lg">
-          <p className="text-stone-700 font-medium">Загрузка…</p>
-          <p className="text-sm text-stone-500 mt-1">Симуляция задержки через setTimeout.</p>
-        </div>
-      </>
-    )
-  }
-
-  if (status === 'error') {
-    return (
-      <>
-        <h1 className="text-2xl font-bold text-stone-800 mb-6">Блог</h1>
-        <EmptyState
-          title="Не удалось загрузить список статей"
-          desc="Это демо error state. Уберите ?error=1 из адресной строки, чтобы увидеть список."
-          action={<Link to="/blog" className="text-amber-600 hover:underline">Попробовать снова →</Link>}
-        />
-      </>
-    )
-  }
-
-  const list = mode.empty ? [] : blogPosts
-  if (list.length === 0) {
-    return (
-      <>
-        <h1 className="text-2xl font-bold text-stone-800 mb-6">Блог</h1>
-        <EmptyState title="Статей пока нет" desc="Скоро добавим полезные материалы о подготовке к поездке и лечении." />
-      </>
-    )
-  }
-
   return (
     <>
       <h1 className="text-2xl font-bold text-stone-800 mb-6">Блог</h1>
       <ul className="space-y-4">
-        {list.map((post) => (
-          <li key={post.id}>
-            <Link to={`/blog/${post.id}`} className="block p-4 bg-white border border-stone-200 rounded-lg hover:border-amber-300">
-              <h2 className="font-semibold text-stone-800">{post.title}</h2>
-              <p className="text-sm text-stone-500 mt-1">{post.date}</p>
-              <p className="text-stone-600 mt-2 text-sm">{post.excerpt}</p>
+        {blogPosts.map((p) => (
+          <li key={p.id}>
+            <Link to={`/blog/${p.id}`} className="block p-4 bg-white border border-stone-200 rounded-lg hover:bg-stone-50">
+              <h2 className="font-semibold text-stone-800">{p.title}</h2>
+              <p className="text-sm text-stone-500">{p.date}</p>
+              <p className="text-stone-600 mt-1">{p.excerpt}</p>
             </Link>
           </li>
         ))}
@@ -459,64 +219,40 @@ export function BlogPage() {
   )
 }
 
-// ——— Одна статья блога (мок) ———
 export function BlogPostPage() {
-  const { id } = useParams<{ id: string }>()
-  const post = blogPosts.find((p) => p.id === (id ?? ''))
+  const { id } = useParams()
+  const post = useMemo(() => blogPosts.find((p) => p.id === id), [id])
   return (
     <>
-      <Link to="/blog" className="text-sm text-amber-600 hover:underline mb-4 inline-block">← Назад к списку</Link>
-      {!post ? (
-        <div className="p-4 bg-white border border-stone-200 rounded-lg">
-          <p className="font-medium text-stone-800">Статья не найдена</p>
-          <p className="text-sm text-stone-600 mt-1">Проверьте ссылку или вернитесь в список статей.</p>
-        </div>
-      ) : (
-        <article>
+      {post ? (
+        <article className="prose prose-stone max-w-none">
           <h1 className="text-2xl font-bold text-stone-800">{post.title}</h1>
-          <p className="text-stone-500 mt-1">{post.date}</p>
+          <p className="text-sm text-stone-500">{post.date}</p>
           <p className="text-stone-700 mt-4">{post.excerpt}</p>
-          <p className="text-stone-600 mt-4">
-            Здесь будет полный текст статьи. Пока контент захардкожен.
-          </p>
+          <p className="text-stone-600 mt-4">Здесь будет полный текст статьи.</p>
         </article>
+      ) : (
+        <p className="text-stone-600">Статья не найдена.</p>
       )}
     </>
   )
 }
 
-// ——— Форма заявки (общие поля по ТЗ) ———
+// ——— Форма заявки: кнопка всегда активна, при отправке — disabled по isSubmitting ———
 function RequestForm() {
   const [sent, setSent] = useState(false)
   const [agree, setAgree] = useState(false)
-  const [goal, setGoal] = useState('')
-  const [procedureType, setProcedureType] = useState('')
-  const [faceOpHistory, setFaceOpHistory] = useState<'yes' | 'no' | ''>('')
-  const [faceOpDetails, setFaceOpDetails] = useState('')
-  const [chronic, setChronic] = useState('')
-  const [allergies, setAllergies] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
-  const validate = () => {
+  const validate = (): Record<string, string> => {
     const next: Record<string, string> = {}
-
-    // Требования V1: телефон + согласие. Остальное — опционально, но валидируем если заполнено.
     if (phone.trim().length < 6) next.phone = 'Введите телефон (минимум 6 символов)'
     if (!agree) next.agree = 'Нужно согласие на обработку персональных данных'
-
-    if (email.trim()) {
-      const ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
-      if (!ok) next.email = 'Похоже, email введён с ошибкой'
-    }
-
-    if (faceOpHistory === 'yes' && faceOpDetails.trim().length < 5) {
-      next.faceOpDetails = 'Опишите операцию на лице (минимум 5 символов)'
-    }
-
+    if (email.trim() && !isValidEmail(email)) next.email = 'Некорректный email'
     return next
   }
 
@@ -526,58 +262,51 @@ function RequestForm() {
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) return
 
-    const send = async () => {
-      setIsSubmitting(true)
-      setSubmitError(null)
-      try {
-        const body = {
-          first_name: undefined,
-          last_name: undefined,
-          phone,
-          email: email || undefined,
-          city: undefined,
-          preferred_dates: undefined,
-          goal: goal || undefined,
-          procedure_type: procedureType || undefined,
-          has_face_operations: faceOpHistory === 'yes' ? true : faceOpHistory === 'no' ? false : undefined,
-          face_operation_details: faceOpDetails || undefined,
-          chronic_diseases: chronic || undefined,
-          allergies: allergies || undefined,
-          has_medical_files: false,
-          comment: undefined,
-        }
+    setIsSubmitting(true)
+    setSubmitError(null)
+    const body = {
+      phone: phone.trim(),
+      email: email.trim() || undefined,
+      first_name: undefined,
+      last_name: undefined,
+      city: undefined,
+      preferred_dates: undefined,
+      goal: undefined,
+      procedure_type: undefined,
+      has_face_operations: undefined,
+      face_operation_details: undefined,
+      chronic_diseases: undefined,
+      allergies: undefined,
+      has_medical_files: false,
+      comment: undefined,
+    }
 
-        const res = await fetch(`${API_BASE}/applications`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(body),
-        })
-
+    fetch(`${API_BASE}/applications/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+      .then(async (res) => {
         if (!res.ok) {
-          let message = `Ошибка отправки: ${res.status}`
+          let msg = `Ошибка: ${res.status}`
           try {
             const data = await res.json()
-            if (data && typeof data.detail === 'string') {
-              message = data.detail
-            }
+            if (data?.detail) msg = typeof data.detail === 'string' ? data.detail : msg
           } catch {
             // ignore
           }
-          setSubmitError(message)
+          setSubmitError(msg)
           return
         }
-
         setSent(true)
-      } catch {
-        setSubmitError('Не удалось отправить заявку. Проверьте соединение или попробуйте позже.')
-      } finally {
+      })
+      .catch(() => {
+        const base = getApiBase()
+        setSubmitError(`Не удалось отправить заявку. Запустите бэкенд: в папке backend выполните «uvicorn app.main:app --host 127.0.0.1 --port 8002». API: ${base}`)
+      })
+      .finally(() => {
         setIsSubmitting(false)
-      }
-    }
-
-    void send()
+      })
   }
 
   if (sent) {
@@ -592,215 +321,75 @@ function RequestForm() {
     )
   }
 
-  const canSubmit = Object.keys(validate()).length === 0
   const fieldClass = (name: string) =>
     `w-full px-3 py-2 border rounded-lg ${errors[name] ? 'border-red-400 bg-red-50' : 'border-stone-300'}`
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 max-w-xl">
-      <div className="grid sm:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-stone-700 mb-1">Имя</label>
-          <input type="text" className={fieldClass('firstName')} placeholder="Имя" onChange={() => errors.firstName && setErrors((e) => ({ ...e, firstName: '' }))} />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-stone-700 mb-1">Фамилия</label>
-          <input type="text" className={fieldClass('lastName')} placeholder="Фамилия" onChange={() => errors.lastName && setErrors((e) => ({ ...e, lastName: '' }))} />
-        </div>
-      </div>
+    <form onSubmit={handleSubmit} className="space-y-4 max-w-xl" id="form">
+      <h2 className="text-xl font-semibold text-stone-800">Оставить заявку</h2>
       <div>
         <label className="block text-sm font-medium text-stone-700 mb-1">Телефон *</label>
         <input
           type="tel"
-          required
           value={phone}
-          onChange={(e) => {
-            setPhone(e.target.value)
-            if (errors.phone) setErrors((prev) => ({ ...prev, phone: '' }))
-          }}
+          onChange={(e) => setPhone(e.target.value)}
           className={fieldClass('phone')}
-          placeholder="+7 ..."
+          placeholder="+7 (999) 123-45-67"
         />
-        {errors.phone ? <p className="text-xs text-red-600 mt-1">{errors.phone}</p> : null}
+        {errors.phone && <p className="mt-1 text-sm text-red-600">{errors.phone}</p>}
       </div>
       <div>
         <label className="block text-sm font-medium text-stone-700 mb-1">Email</label>
         <input
           type="email"
           value={email}
-          onChange={(e) => {
-            setEmail(e.target.value)
-            if (errors.email) setErrors((prev) => ({ ...prev, email: '' }))
-          }}
+          onChange={(e) => setEmail(e.target.value)}
           className={fieldClass('email')}
-          placeholder="email@example.com"
+          placeholder="example@mail.ru"
         />
-        {errors.email ? <p className="text-xs text-red-600 mt-1">{errors.email}</p> : null}
+        {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email}</p>}
       </div>
-      <div>
-        <label className="block text-sm font-medium text-stone-700 mb-1">Город вылета</label>
-        <input type="text" className={fieldClass('city')} placeholder="Москва" onChange={() => errors.city && setErrors((e) => ({ ...e, city: '' }))} />
-      </div>
-      <div>
-        <label className="block text-sm font-medium text-stone-700 mb-1">Предполагаемая дата поездки / гибкий график</label>
-        <input type="text" className={fieldClass('date')} placeholder="Например: май 2025 или гибко" onChange={() => errors.date && setErrors((e) => ({ ...e, date: '' }))} />
-      </div>
-      <div>
-        <label className="block text-sm font-medium text-stone-700 mb-1">Цель поездки</label>
-        <select
-          value={goal}
-          onChange={(e) => setGoal(e.target.value)}
-          className={fieldClass('goal')}
-        >
-          <option value="">Выберите</option>
-          <option value="consult">Консультация</option>
-          <option value="implant">Импланты</option>
-          <option value="prosthetics">Протезирование</option>
-          <option value="other">Другое</option>
-        </select>
-      </div>
-
-      {/* Доп. сбор данных (по вашему запросу) */}
-      <div>
-        <label className="block text-sm font-medium text-stone-700 mb-1">Тип процедуры</label>
-        <select
-          value={procedureType}
-          onChange={(e) => setProcedureType(e.target.value)}
-          className={fieldClass('procedureType')}
-        >
-          <option value="">Выберите</option>
-          <option value="blepharo">Блефаропластика</option>
-          <option value="facelift">Подтяжка лица</option>
-          <option value="injections">Инъекции</option>
-          <option value="laser">Лазер</option>
-        </select>
-        <p className="text-xs text-stone-500 mt-1">Пока это просто сбор данных в форме (без отправки на сервер).</p>
-      </div>
-
-      <div className="p-4 bg-white border border-stone-200 rounded-lg">
-        <p className="text-sm font-medium text-stone-800 mb-2">История операций на лице</p>
-        <div className="flex flex-wrap gap-4">
-          <label className="flex items-center gap-2 text-sm text-stone-700">
-            <input
-              type="radio"
-              name="faceOpHistory"
-              value="no"
-              checked={faceOpHistory === 'no'}
-              onChange={() => setFaceOpHistory('no')}
-            />
-            Нет
-          </label>
-          <label className="flex items-center gap-2 text-sm text-stone-700">
-            <input
-              type="radio"
-              name="faceOpHistory"
-              value="yes"
-              checked={faceOpHistory === 'yes'}
-              onChange={() => setFaceOpHistory('yes')}
-            />
-            Да
-          </label>
-        </div>
-        {faceOpHistory === 'yes' && (
-          <div className="mt-3">
-            <label className="block text-sm font-medium text-stone-700 mb-1">Подробности</label>
-            <textarea
-              rows={2}
-              value={faceOpDetails}
-              onChange={(e) => setFaceOpDetails(e.target.value)}
-              className={fieldClass('faceOpDetails')}
-              placeholder="Какая операция, когда, были ли осложнения"
-            />
-            {errors.faceOpDetails ? <p className="text-xs text-red-600 mt-1">{errors.faceOpDetails}</p> : null}
-          </div>
-        )}
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-stone-700 mb-1">Хронические болезни</label>
-        <textarea
-          rows={2}
-          value={chronic}
-          onChange={(e) => setChronic(e.target.value)}
-          className={fieldClass('chronic')}
-          placeholder="Если есть — перечислите"
-        />
-      </div>
-      <div>
-        <label className="block text-sm font-medium text-stone-700 mb-1">Аллергии</label>
-        <textarea
-          rows={2}
-          value={allergies}
-          onChange={(e) => setAllergies(e.target.value)}
-          className={fieldClass('allergies')}
-          placeholder="Если есть — укажите (лекарства, анестезия и т.д.)"
-        />
-      </div>
-      <div>
-        <label className="block text-sm font-medium text-stone-700 mb-1">Мед. документы (фото/файлы)</label>
-        <input type="file" multiple accept="image/*,.pdf" className="w-full text-sm text-stone-600" />
-      </div>
-      <div>
-        <label className="block text-sm font-medium text-stone-700 mb-1">Комментарий</label>
-        <textarea rows={3} className={fieldClass('comment')} placeholder="Дополнительная информация" onChange={() => errors.comment && setErrors((e) => ({ ...e, comment: '' }))} />
-      </div>
-      <label className="flex items-start gap-2">
+      <div className="flex items-start gap-2">
         <input
           type="checkbox"
+          id="agree"
           checked={agree}
-          onChange={(e) => {
-            setAgree(e.target.checked)
-            if (errors.agree) setErrors((prev) => ({ ...prev, agree: '' }))
-          }}
-          className="mt-1"
+          onChange={(e) => setAgree(e.target.checked)}
+          className="mt-1 rounded border-stone-300"
         />
-        <span className="text-sm text-stone-600">Согласен на обработку персональных данных *</span>
-      </label>
-      {errors.agree ? <p className="text-xs text-red-600 -mt-2">{errors.agree}</p> : null}
-      {submitError ? <p className="text-xs text-red-600">{submitError}</p> : null}
-      <div className="flex flex-wrap gap-3">
-        {/* Улучшение интерфейса: кнопка disabled, пока не заполнен телефон и нет согласия */}
-        <button
-          type="submit"
-          disabled={!canSubmit || isSubmitting}
-          className="px-5 py-2.5 bg-amber-500 text-white rounded-lg font-medium hover:bg-amber-600 disabled:opacity-50"
-        >
-          {isSubmitting ? 'Отправка…' : 'Отправить заявку'}
-        </button>
-        <button type="button" className="px-5 py-2.5 border border-stone-300 rounded-lg font-medium hover:bg-stone-100">
-          Заказать звонок
-        </button>
+        <label htmlFor="agree" className="text-sm text-stone-700">
+          Я даю согласие на обработку персональных данных *
+        </label>
       </div>
+      {errors.agree && <p className="text-sm text-red-600">{errors.agree}</p>}
+      {submitError && <p className="text-sm text-red-600">{submitError}</p>}
+      <button
+        type="submit"
+        disabled={isSubmitting}
+        className="w-full py-2.5 bg-amber-500 text-white rounded-lg font-medium hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {isSubmitting ? 'Отправка…' : 'Отправить заявку'}
+      </button>
     </form>
   )
 }
 
-// ——— Контакты + форма ———
+// ——— Контакты ———
 export function ContactsPage() {
   return (
     <>
-      <h1 className="text-2xl font-bold text-stone-800 mb-6">Контакты / Забронировать поездку</h1>
-      <div className="grid md:grid-cols-2 gap-8">
-        <div>
-          <h2 className="font-semibold text-stone-800 mb-2">Связь</h2>
-          <p><a href={`tel:${contacts.phone.replace(/\D/g, '')}`} className="text-amber-600 hover:underline">{contacts.phone}</a></p>
-          <p><a href={`mailto:${contacts.email}`} className="text-amber-600 hover:underline">{contacts.email}</a></p>
-          <p>
-            <a href={contacts.whatsapp} target="_blank" rel="noreferrer" className="text-amber-600 hover:underline">WhatsApp</a>
-            {' · '}
-            <a href={contacts.telegram} target="_blank" rel="noreferrer" className="text-amber-600 hover:underline">Telegram</a>
-          </p>
-        </div>
-        <div id="form">
-          <h2 className="font-semibold text-stone-800 mb-4">Оставить заявку</h2>
-          <RequestForm />
-        </div>
-      </div>
+      <h1 className="text-2xl font-bold text-stone-800 mb-6">Контакты</h1>
+      <p className="text-stone-600 mb-6">
+        Телефон: <a href={`tel:${contacts.phone.replace(/\D/g, '')}`} className="text-amber-600 hover:underline">{contacts.phone}</a>
+        <br />
+        Email: <a href={`mailto:${contacts.email}`} className="text-amber-600 hover:underline">{contacts.email}</a>
+      </p>
+      <RequestForm />
     </>
   )
 }
 
-// ——— Юридическая страница (политика, оферта, мед. отказ) ———
+// ——— Юридическая страница ———
 export function LegalPage({ type }: { type: 'privacy' | 'offer' | 'medical' }) {
   const page = legalPages[type === 'medical' ? 'medical' : type]
   return (
@@ -811,17 +400,241 @@ export function LegalPage({ type }: { type: 'privacy' | 'offer' | 'medical' }) {
   )
 }
 
+// ——— Вход ———
+export function LoginPage() {
+  const navigate = useNavigate()
+  const { setToken } = useAuth()
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const next: Record<string, string> = {}
+    if (!email.trim()) next.email = 'Введите email'
+    else if (!isValidEmail(email)) next.email = 'Некорректный email'
+    if (!password) next.password = 'Введите пароль'
+    else if (password.length < 8) next.password = 'Не менее 8 символов'
+    setErrors(next)
+    if (Object.keys(next).length > 0) return
+    setLoading(true)
+    setSubmitError(null)
+    try {
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSubmitError(typeof data.detail === 'string' ? data.detail : 'Неверный email или пароль')
+        return
+      }
+      if (data.access_token) {
+        setToken(data.access_token)
+        navigate('/', { replace: true })
+      } else setSubmitError('Ошибка ответа сервера')
+    } catch {
+      setSubmitError('Ошибка соединения')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fc = (n: string) => `w-full px-3 py-2 border rounded-lg ${errors[n] ? 'border-red-400 bg-red-50' : 'border-stone-300'}`
+  return (
+    <div className="max-w-md mx-auto">
+      <h1 className="text-2xl font-bold text-stone-800 mb-4">Вход</h1>
+      <form onSubmit={handleSubmit} className="p-6 bg-white border border-stone-200 rounded-lg space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-stone-700 mb-1">Email *</label>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={fc('email')} required />
+          {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email}</p>}
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-stone-700 mb-1">Пароль *</label>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className={fc('password')} minLength={8} required />
+          {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password}</p>}
+        </div>
+        {submitError && <p className="text-sm text-red-600">{submitError}</p>}
+        <button type="submit" disabled={loading} className="w-full py-2 bg-amber-500 text-white rounded-lg font-medium hover:bg-amber-600 disabled:opacity-50">
+          {loading ? 'Вход…' : 'Войти'}
+        </button>
+      </form>
+      <p className="mt-4 text-sm text-stone-600">
+        Нет аккаунта? <Link to="/register" className="text-amber-600 hover:underline">Зарегистрироваться</Link>
+      </p>
+    </div>
+  )
+}
+
+// ——— Регистрация ———
+export function RegisterPage() {
+  const navigate = useNavigate()
+  const { setToken } = useAuth()
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const next: Record<string, string> = {}
+    if (!email.trim()) next.email = 'Введите email'
+    else if (!isValidEmail(email)) next.email = 'Некорректный email'
+    if (!password) next.password = 'Введите пароль'
+    else if (password.length < 8) next.password = 'Не менее 8 символов'
+    if (password !== confirmPassword) next.confirmPassword = 'Пароли не совпадают'
+    setErrors(next)
+    if (Object.keys(next).length > 0) return
+    setLoading(true)
+    setSubmitError(null)
+    try {
+      const res = await fetch(`${API_BASE}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSubmitError(typeof data.detail === 'string' ? data.detail : 'Ошибка регистрации')
+        return
+      }
+      const loginRes = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+      })
+      const loginData = await loginRes.json().catch(() => ({}))
+      if (loginData.access_token) {
+        setToken(loginData.access_token)
+        navigate('/', { replace: true })
+      } else navigate('/login', { replace: true })
+    } catch {
+      setSubmitError('Ошибка соединения')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fc = (n: string) => `w-full px-3 py-2 border rounded-lg ${errors[n] ? 'border-red-400 bg-red-50' : 'border-stone-300'}`
+  return (
+    <div className="max-w-md mx-auto">
+      <h1 className="text-2xl font-bold text-stone-800 mb-4">Регистрация</h1>
+      <form onSubmit={handleSubmit} className="p-6 bg-white border border-stone-200 rounded-lg space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-stone-700 mb-1">Email *</label>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={fc('email')} required />
+          {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email}</p>}
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-stone-700 mb-1">Пароль *</label>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className={fc('password')} minLength={8} required />
+          {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password}</p>}
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-stone-700 mb-1">Повторите пароль *</label>
+          <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={fc('confirmPassword')} />
+          {errors.confirmPassword && <p className="mt-1 text-sm text-red-600">{errors.confirmPassword}</p>}
+        </div>
+        {submitError && <p className="text-sm text-red-600">{submitError}</p>}
+        <button type="submit" disabled={loading} className="w-full py-2 bg-amber-500 text-white rounded-lg font-medium hover:bg-amber-600 disabled:opacity-50">
+          {loading ? 'Регистрация…' : 'Зарегистрироваться'}
+        </button>
+      </form>
+      <p className="mt-4 text-sm text-stone-600">
+        Уже есть аккаунт? <Link to="/login" className="text-amber-600 hover:underline">Войти</Link>
+      </p>
+    </div>
+  )
+}
+
+// ——— Админка (список заявок по токену) ———
+type AppFromApi = { id: string; status: string; created_at: string; phone?: string; email?: string; goal?: string; procedure_type?: string; comment?: string }
+
+export function AdminPage() {
+  const { token } = useAuth()
+  const [applications, setApplications] = useState<AppFromApi[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [forbidden, setForbidden] = useState(false)
+
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    setForbidden(false)
+    apiFetch('/applications')
+      .then((res) => {
+        if (res.status === 403) {
+          if (!cancelled) setForbidden(true)
+          return
+        }
+        if (!res.ok) return res.json().then(() => { if (!cancelled) setError('Ошибка загрузки'); return [] })
+        return res.json()
+      })
+      .then((data: AppFromApi[]) => {
+        if (!cancelled) setApplications(Array.isArray(data) ? data : [])
+      })
+      .catch(() => { if (!cancelled) setError('Ошибка соединения') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+  }, [token])
+
+  if (!token) {
+    return (
+      <div className="max-w-md mx-auto p-6 bg-white border border-stone-200 rounded-lg">
+        <p className="text-stone-700 mb-4">Войдите, чтобы видеть заявки.</p>
+        <Link to="/login" className="inline-block px-4 py-2 bg-amber-500 text-white rounded-lg font-medium hover:bg-amber-600">Войти</Link>
+      </div>
+    )
+  }
+  if (forbidden) return <div className="p-6 bg-red-50 border border-red-200 rounded-lg"><p className="font-medium text-red-800">Нет прав</p></div>
+  if (error) return <p className="text-red-600">{error}</p>
+  if (loading) return <p className="text-stone-600">Загрузка…</p>
+  if (applications.length === 0) return <p className="p-6 bg-white border border-stone-200 rounded-lg text-stone-600">Заявок пока нет.</p>
+  return (
+    <div>
+      <h1 className="text-2xl font-bold text-stone-800 mb-6">Заявки</h1>
+      <div className="overflow-x-auto">
+        <table className="w-full bg-white border border-stone-200 rounded-lg">
+          <thead>
+            <tr className="border-b border-stone-200 bg-stone-50">
+              <th className="text-left p-3 text-sm font-medium text-stone-700">Дата</th>
+              <th className="text-left p-3 text-sm font-medium text-stone-700">Телефон</th>
+              <th className="text-left p-3 text-sm font-medium text-stone-700">Email</th>
+              <th className="text-left p-3 text-sm font-medium text-stone-700">Статус</th>
+              <th className="text-left p-3 text-sm font-medium text-stone-700">Комментарий</th>
+            </tr>
+          </thead>
+          <tbody>
+            {applications.map((app) => (
+              <tr key={app.id} className="border-b border-stone-100 hover:bg-stone-50">
+                <td className="p-3 text-sm">{new Date(app.created_at).toLocaleString('ru')}</td>
+                <td className="p-3 text-sm">{app.phone ?? '—'}</td>
+                <td className="p-3 text-sm">{app.email ?? '—'}</td>
+                <td className="p-3 text-sm">{app.status ?? '—'}</td>
+                <td className="p-3 text-sm max-w-xs truncate" title={app.comment ?? ''}>{app.comment ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 // ——— 404 ———
 export function NotFoundPage() {
   return (
     <div className="text-center py-12">
       <h1 className="text-2xl font-bold text-stone-800 mb-2">Страница не найдена</h1>
       <p className="text-stone-600 mb-6">Запрашиваемая страница не существует.</p>
-      <div className="flex flex-wrap gap-3 justify-center">
-        <Link to="/" className="text-amber-600 hover:underline">Главная</Link>
-        <Link to="/uslugi" className="text-amber-600 hover:underline">Услуги</Link>
-        <Link to="/kontakty" className="text-amber-600 hover:underline">Контакты</Link>
-      </div>
+      <Link to="/" className="text-amber-600 hover:underline">На главную</Link>
     </div>
   )
 }
